@@ -14,7 +14,7 @@ set.seed(42)
 # =========================================================================
 # 1. Ingest Data
 # =========================================================================
-file_path <- here("..", "Data", "adiya_isla_scores.xlsx")
+file_path <- here("..", "Data", "consolidated_results.xlsx")
 df_raw    <- read_excel(file_path)
 
 # Filter down to complete numeric/ordinal rating items

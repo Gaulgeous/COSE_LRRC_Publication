@@ -8,6 +8,8 @@ library(e1071)
 library(scatterplot3d)
 library(ggplot2)
 library(dplyr)
+library(Matrix)
+library(GPArotation)
 
 set.seed(42)
 
@@ -15,7 +17,7 @@ set.seed(42)
 # 1. Ingest Data
 # =========================================================================
 file_path <- here("..", "Data", "consolidated_results.xlsx")
-df_raw    <- read_excel(file_path)
+df_raw    <- read_excel(file_path, sheet="Whole")
 
 # Filter down to complete numeric/ordinal rating items
 items <- na.omit(df_raw[, sapply(df_raw, is.numeric)])
@@ -42,12 +44,25 @@ print(round(kendall_ci$rho, 3))
 cat("\n")
 
 
-poly_fit       <- polychoric(items, ML = FALSE, correct = 0.5, smooth = TRUE)
-cor_polychoric <- poly_fit$rho
+# 1. Compute exact 2-step MLE without Taylor approximations or continuity distortion
+#    ML = TRUE      -> Equivalent to Python's log-likelihood minimization
+#    global = FALSE -> Evaluates thresholds per pair (like Python's np.unique)
+#    correct = 0    -> Prevents artificial off-diagonal probability inflation
+#    smooth = FALSE -> Prevents cor.smooth from flattening strong signals
+poly_mle <- polychoric(
+  items, 
+  ML      = TRUE, 
+  global  = FALSE, 
+  correct = 0, 
+  smooth  = FALSE
+)$rho
 
-cat("--- Polychoric Correlation Matrix ---\n")
+# 2. Apply Higham (2002) nearest correlation projection (identical to Python's corr_nearest)
+cor_polychoric <- as.matrix(nearPD(poly_mle, corr = TRUE, keepDiag = TRUE)$mat)
+dimnames(cor_polychoric) <- dimnames(poly_mle)
+
+cat("--- Polychoric Matrix (Matching Python Implementation) ---\n")
 print(round(cor_polychoric, 3))
-cat("\n")
 
 # =========================================================================
 # 3. Factorability Diagnostics (Bartlett's Test & Bootstrapped KMO)

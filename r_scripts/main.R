@@ -109,6 +109,20 @@ dimnames(cor_polychoric) <- dimnames(poly_mle)
 cat("--- Polychoric Matrix (Matching Python Implementation) ---\n")
 print(round(cor_polychoric, 3))
 
+# Lower triangle heatmap (standard publication format)
+# plot_correlation_heatmap(
+#   cor_mat = cor_polychoric,
+#   type    = "lower",
+#   title   = "Polychoric Correlation of Publication's Coverage of Scorecard Components"
+# )
+
+# Full matrix heatmap without text values
+plot_correlation_heatmap(
+  cor_mat     = cor_polychoric,
+  type        = "full",
+  title = "Polychoric Correlation of Publication's Coverage of Scorecard Components"
+)
+
 # =========================================================================
 # Factorability Diagnostics (Bartlett's Test & Bootstrapped KMO)
 # =========================================================================

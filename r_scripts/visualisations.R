@@ -344,3 +344,69 @@ plot_eigenvalue_retention <- function(eigenvalues,
     data = df_eigen
   ))
 }
+
+plot_correlation_heatmap <- function(cor_mat,
+                                     type = c("lower", "full", "upper"),
+                                     palette = c("#0066FF", "#FFFFFF", "#FF2A54"),
+                                     show_values = TRUE,
+                                     digits = 2,
+                                     title = "Correlation Heatmap") {
+  type <- match.arg(type)
+  cor_mat <- as.matrix(cor_mat)
+  
+  # Mask upper or lower triangle if requested
+  plot_mat <- cor_mat
+  if (type == "lower") {
+    plot_mat[upper.tri(plot_mat)] <- NA
+  } else if (type == "upper") {
+    plot_mat[lower.tri(plot_mat)] <- NA
+  }
+  
+  # Reshape into tidy format
+  df <- as.data.frame(as.table(plot_mat))
+  colnames(df) <- c("Var1", "Var2", "Correlation")
+  df <- df[!is.na(df$Correlation), ]
+  
+  # Orient axes to display diagonal from top-left to bottom-right
+  df$Var1 <- factor(df$Var1, levels = rev(rownames(cor_mat)))
+  df$Var2 <- factor(df$Var2, levels = colnames(cor_mat))
+  
+  # Dynamic text contrast for readability over dark tiles
+  df$text_color <- ifelse(abs(df$Correlation) > 0.6, "white", "black")
+  
+  p <- ggplot2::ggplot(df, ggplot2::aes(x = Var2, y = Var1, fill = Correlation)) +
+    ggplot2::geom_tile(color = "white", linewidth = 0.6) +
+    ggplot2::scale_fill_gradient2(
+      low      = palette[1],
+      mid      = palette[2],
+      high     = palette[3],
+      midpoint = 0,
+      limits   = c(-1, 1),
+      name     = "Pearson\nCorr"
+    ) +
+    ggplot2::coord_fixed() +
+    ggplot2::labs(title = title, x = NULL, y = NULL) +
+    ggplot2::theme_minimal() +
+    ggplot2::theme(
+      plot.title      = ggplot2::element_text(hjust = 0.5, face = "bold", size = 14, margin = ggplot2::margin(b = 10)),
+      axis.text.x     = ggplot2::element_text(angle = 45, vjust = 1, hjust = 1, face = "bold", size = 10),
+      axis.text.y     = ggplot2::element_text(face = "bold", size = 10),
+      panel.grid      = ggplot2::element_blank(),
+      legend.position = "right"
+    )
+  
+  if (show_values) {
+    p <- p + ggplot2::geom_text(
+      ggplot2::aes(
+        label = sprintf(paste0("%.", digits, "f"), Correlation),
+        color = text_color
+      ),
+      size     = 3.8,
+      fontface = "bold",
+      show.legend = FALSE
+    ) +
+      ggplot2::scale_color_identity()
+  }
+  
+  return(p)
+}

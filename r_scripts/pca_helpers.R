@@ -25,24 +25,21 @@ safe_kendall <- function(x, y) {
   if (is.na(val) || is.nan(val)) 0.0 else as.numeric(val)
 }
 
-# Project a symmetric matrix to the nearest positive semi-definite (PSD) matrix
-# using Higham's algorithm (Matrix::nearPD)
-project_near_psd <- function(mat, corr = TRUE, keepDiag = TRUE, ...) {
-  # Input validation
-  if (!is.matrix(mat)) {
-    mat <- as.matrix(mat)
+# Conditional Higham projection only when non-PSD
+project_near_psd <- function(mat, tol = 1e-8, corr = TRUE) {
+  # Quick eigenvalue check on 9x9 matrix (near instantaneous)
+  evals <- eigen(mat, symmetric = TRUE, only.values = TRUE)$values
+  
+  # If already positive semi-definite, return unchanged to preserve raw correlations
+  if (min(evals) >= -tol) {
+    return(mat)
   }
   
-  # Run Higham's nearest positive definite projection
-  pd_result <- Matrix::nearPD(mat, corr = corr, keepDiag = keepDiag, ...)
-  
-  # Coerce from dpoMatrix back to standard dense matrix
-  psd_mat <- as.matrix(pd_result$mat)
-  
-  # Preserve original row and column names
-  dimnames(psd_mat) <- dimnames(mat)
-  
-  psd_mat
+  # Project only if indefinite
+  pd_result <- Matrix::nearPD(mat, corr = corr, keepDiag = TRUE)
+  out <- as.matrix(pd_result$mat)
+  dimnames(out) <- dimnames(mat)
+  out
 }
 
 compute_psd_kendall <- function(df) {

@@ -24,7 +24,7 @@ project_pca_scores <- function(df, pca_res) {
   rownames(scores_r3) <- rownames(clean_df)
   
   # Component naming and polarity alignment
-  colnames(scores_r3) <- c("Data Provenance", "Process Replication", "Authority & Expertise")
+  colnames(scores_r3) <- c("Data Provenance", "Process Replication")
   scores_r3[, "Data Provenance"] <- -1 * scores_r3[, "Data Provenance"]
   
   scores_r3

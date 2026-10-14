@@ -1,88 +1,92 @@
-compute_category_means_simple <- function(df, 
-                                          category_col = NULL, 
-                                          na.rm = TRUE) {
+compute_category_means_simple <- function(df, na.rm = TRUE) {
   # -------------------------------------------------------------------------
-  # 1. Parse Multi-Column Structure
+  # 1. Parse Headers & Structure (Handles 2-Tier Merged Headers)
   # -------------------------------------------------------------------------
+  df_mat <- as.matrix(df)
   
-  # Check if df has a raw 2-tier header in rows 1 and 2 (e.g. read.csv(header=FALSE))
-  has_2row_header <- any(grepl("publication", as.character(df[1, ]), ignore.case = TRUE)) &&
-                     any(grepl("category", as.character(df[2, ]), ignore.case = TRUE))
+  # Check if Row 1 & Row 2 contain header metadata (e.g., read_excel(col_names = FALSE))
+  row1_txt <- tolower(as.character(df_mat[1, ]))
+  row2_txt <- tolower(as.character(df_mat[2, ]))
   
-  if (has_2row_header) {
-    top_header <- as.character(df[1, ])
-    sub_header <- as.character(df[2, ])
+  is_2tier <- any(grepl("publication", row1_txt)) && 
+    any(grepl("category|author", row2_txt))
+  
+  if (is_2tier) {
+    # Data starts on row 3
+    data_rows <- df_mat[-c(1, 2), , drop = FALSE]
     
-    # Identify publication vs non-publication columns
-    pub_mask <- grepl("publication", top_header, ignore.case = TRUE)
-    cat_idx  <- which(pub_mask & grepl("category", sub_header, ignore.case = TRUE))[1]
+    cat_col_idx    <- which(grepl("category", row2_txt))[1]
+    author_col_idx <- which(grepl("author", row2_txt))[1]
     
-    cat_vector <- as.character(df[-c(1, 2), cat_idx])
-    
-    # Non-publication data subset (coerced to numeric)
-    score_df <- df[-c(1, 2), !pub_mask, drop = FALSE]
-    score_mat <- data.matrix(score_df)
-    colnames(score_mat) <- sub_header[!pub_mask]
-    
-  } else if (is.data.frame(df$Publication) || is.matrix(df$Publication)) {
-    # Nested data.frame / matrix column (e.g., df$Publication$Category)
-    pub_df     <- as.data.frame(df$Publication)
-    cat_col_id <- if (!is.null(category_col)) category_col else grep("category", colnames(pub_df), ignore.case = TRUE, value = TRUE)[1]
-    cat_vector <- as.character(pub_df[[cat_col_id]])
-    
-    # All columns other than df$Publication
-    non_pub_df <- df[, setdiff(names(df), "Publication"), drop = FALSE]
-    score_mat  <- data.matrix(non_pub_df)
-    
+    score_col_idx  <- setdiff(seq_len(ncol(df_mat)), c(cat_col_idx, author_col_idx))
+    score_names    <- as.character(df_mat[2, score_col_idx])
   } else {
-    # Delimited/prefixed column names (e.g., Publication.Category or Publication_Category)
-    all_cols <- colnames(df)
-    pub_mask <- grepl("^publication[._/ ]?", all_cols, ignore.case = TRUE)
+    # Single-row header (e.g., read_excel(skip = 1))
+    data_rows      <- df_mat
+    all_cols_lower <- tolower(colnames(df))
     
-    if (!any(pub_mask)) {
-      # Fallback: look for a column literally named 'Category'
-      pub_mask <- grepl("^(category|author)$", all_cols, ignore.case = TRUE)
-    }
+    cat_col_idx    <- which(grepl("category", all_cols_lower))[1]
+    author_col_idx <- which(grepl("author|publication", all_cols_lower))[1]
     
-    if (!is.null(category_col)) {
-      cat_vector <- as.character(df[[category_col]])
-    } else {
-      cat_name   <- grep("category", all_cols[pub_mask], ignore.case = TRUE, value = TRUE)[1]
-      cat_vector <- as.character(df[[cat_name]])
-    }
-    
-    # Non-publication score columns
-    non_pub_df <- df[, !pub_mask, drop = FALSE]
-    score_mat  <- data.matrix(non_pub_df)
+    score_col_idx  <- setdiff(seq_len(ncol(df)), c(cat_col_idx, author_col_idx))
+    score_names    <- colnames(df)[score_col_idx]
   }
   
   # -------------------------------------------------------------------------
-  # 2. Iterate Over Categories & Compute Column Means
+  # 2. Forward-Fill Merged Category Cells Across Papers
   # -------------------------------------------------------------------------
+  raw_cat <- trimws(as.character(data_rows[, cat_col_idx]))
+  authors <- trimws(as.character(data_rows[, author_col_idx]))
   
-  unique_categories <- unique(stats::na.omit(cat_vector))
-  n_cats            <- length(unique_categories)
-  n_cols            <- ncol(score_mat)
-  col_names         <- colnames(score_mat)
+  # Carry the category label down across all authors in that merged group
+  cat_filled  <- character(length(raw_cat))
+  current_cat <- NA_character_
   
-  # Pre-allocate output matrix: rows = categories, cols = scorecard items
-  mean_mat <- matrix(
-    NA_real_, 
-    nrow     = n_cats, 
-    ncol     = n_cols, 
-    dimnames = list(unique_categories, col_names)
-  )
-  
-  for (i in seq_along(unique_categories)) {
-    cat_val <- unique_categories[i]
-    row_idx <- which(cat_vector == cat_val)
-    
-    # Calculate column means for this category subset
-    cat_subset <- score_mat[row_idx, , drop = FALSE]
-    mean_mat[i, ] <- colMeans(cat_subset, na.rm = na.rm)
+  for (i in seq_along(raw_cat)) {
+    val <- raw_cat[i]
+    if (!is.na(val) && val != "" && val != "NA") {
+      current_cat <- val
+    }
+    cat_filled[i] <- current_cat
   }
   
-  return(mean_mat)
+  # -------------------------------------------------------------------------
+  # 3. Numeric Scorecard Extraction & Row Validation
+  # -------------------------------------------------------------------------
+  score_mat <- apply(data_rows[, score_col_idx, drop = FALSE], 2, function(col) {
+    suppressWarnings(as.numeric(trimws(col)))
+  })
+  colnames(score_mat) <- trimws(score_names)
+  
+  # Filter out empty rows (keeps rows that have an author and valid scores)
+  valid_rows <- !is.na(cat_filled) & cat_filled != "" & 
+    !is.na(authors) & authors != "" & authors != "NA" &
+    apply(score_mat, 1, function(r) any(!is.na(r)))
+  
+  cat_clean   <- cat_filled[valid_rows]
+  score_clean <- score_mat[valid_rows, , drop = FALSE]
+  
+  # -------------------------------------------------------------------------
+  # 4. Compute Author Counts and Decimals Means per Category
+  # -------------------------------------------------------------------------
+  unique_cats <- unique(cat_clean)
+  
+  out_rows <- lapply(unique_cats, function(cat_name) {
+    row_idx <- which(cat_clean == cat_name)
+    
+    # Total count of papers/authors in this category
+    author_count <- length(row_idx)
+    
+    # Decimal means across all papers in this category
+    item_means <- colMeans(score_clean[row_idx, , drop = FALSE], na.rm = na.rm)
+    
+    c(Author = author_count, round(item_means, 3))
+  })
+  
+  result_matrix <- do.call(rbind, out_rows)
+  rownames(result_matrix) <- unique_cats
+  
+  return(result_matrix)
 }
 
 compute_category_euclidean_distance_simple <- function(category_means, 

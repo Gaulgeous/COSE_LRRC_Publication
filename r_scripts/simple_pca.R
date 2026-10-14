@@ -207,105 +207,82 @@ perform_horn_parallel_analysis_simple <- function(x,
   ))
 }
 
-perform_abels_pca_oblimin_simple <- function(x, 
-                                             n_factors = 3, 
-                                             n_obs = NULL,
-                                             align_anchors = TRUE) {
-  # 1. Standardize Correlation Matrix and Dimension Information
-  if (is.matrix(x) && nrow(x) == ncol(x) && all(abs(diag(x) - 1) < 1e-5)) {
-    r_mat <- x
-    if (is.null(n_obs) && is.null(n_factors)) {
-      stop("When passing a correlation matrix with dynamic n_factors, provide `n_obs`.")
-    }
-  } else {
-    mat   <- data.matrix(x)
-    n_obs <- nrow(stats::na.omit(mat))
-    r_mat <- stats::cor(mat, use = "pairwise.complete.obs")
+perform_abels_pca_oblimin_simple <- function(x, n_factors, n_obs, align_anchors = TRUE) {
+  # 1. Input checks & matrix conversion
+  if (is.data.frame(x)) {
+    x <- as.matrix(x)
+  }
+  if (!is.matrix(x) || nrow(x) != ncol(x)) {
+    stop("`x` must be a square correlation matrix.")
   }
   
-  cols   <- colnames(r_mat)
-  n_vars <- ncol(r_mat)
+  # 2. Extract full eigenvalues from the correlation matrix
+  raw_evals <- eigen(x, symmetric = TRUE, only.values = TRUE)$values
+  sorted_evals <- sort(raw_evals, decreasing = TRUE)
   
-  # 2. Dynamic Factor Retention via Horn's Parallel Analysis if unspecified
-  if (is.null(n_factors)) {
-    pa_res    <- perform_horn_parallel_analysis_simple(r_mat, n_obs = n_obs, 
-                                                       plot_comparison = FALSE, verbose = FALSE)
-    n_factors <- max(1, pa_res$n_factors_parallel)
-  }
-  
-  # 3. Eigendecomposition & Unrotated Loadings: Lambda = V * sqrt(D)
-  decomp       <- eigen(r_mat, symmetric = TRUE)
-  sorted_evals <- decomp$values
-  top_evals    <- sorted_evals[seq_len(n_factors)]
-  top_evecs    <- decomp$vectors[, seq_len(n_factors), drop = FALSE]
-  
-  unrotated_loadings <- top_evecs %*% diag(sqrt(pmax(top_evals, 0)), nrow = n_factors)
-  comp_names         <- paste0("PC", seq_len(n_factors))
-  dimnames(unrotated_loadings) <- list(cols, comp_names)
-  
-  # 4. Direct Oblimin Oblique Rotation (gam = 0 corresponds to direct quartimin)
-  rot_res <- GPArotation::oblimin(unrotated_loadings, gam = 0, normalize = FALSE)
-  rotated_loadings <- unclass(rot_res$loadings)
-  phi_matrix       <- rot_res$Phi
-  dimnames(rotated_loadings) <- list(cols, comp_names)
-  dimnames(phi_matrix)       <- list(comp_names, comp_names)
-  
-  # 5. Anchor Alignment for Interpretability (Applied if 3 components extracted)
-  if (align_anchors && n_factors == 3) {
-    find_idx <- function(pattern) {
-      idx <- grep(pattern, cols, ignore.case = TRUE)
-      if (length(idx) > 0) idx[1] else NA_integer_
-    }
-    
-    auth_row <- find_idx("Authentic")
-    rel_row  <- find_idx("Reliab")
-    law_row  <- find_idx("Lawful")
-    
-    if (!is.na(auth_row) && !is.na(rel_row)) {
-      # Column permutation: Map anchors to their primary components
-      c1_idx <- which.max(abs(rotated_loadings[auth_row, ]))
-      c2_idx <- which.max(abs(rotated_loadings[rel_row, ]))
-      c3_idx <- setdiff(seq_len(3), c(c1_idx, c2_idx))
-      
-      col_order        <- c(c1_idx, c2_idx, c3_idx)
-      rotated_loadings <- rotated_loadings[, col_order]
-      phi_matrix       <- phi_matrix[col_order, col_order]
-      
-      # Sign reflection: Orient anchors to point in the positive direction
-      target_signs <- c(
-        if (rotated_loadings[auth_row, 1] < 0) -1 else 1,
-        if (rotated_loadings[rel_row, 2] < 0) -1 else 1,
-        if (!is.na(law_row) && rotated_loadings[law_row, 3] < 0) -1 else 1
-      )
-      
-      rotated_loadings <- rotated_loadings %*% diag(target_signs)
-      phi_matrix       <- diag(target_signs) %*% phi_matrix %*% diag(target_signs)
-      
-      dimnames(rotated_loadings) <- list(cols, comp_names)
-      dimnames(phi_matrix)       <- list(comp_names, comp_names)
-    }
-  }
-  
-  # 6. Structure Matrix & Assignment Summary
-  structure_matrix <- rotated_loadings %*% phi_matrix
-  dimnames(structure_matrix) <- list(cols, comp_names)
-  
-  abs_loadings        <- abs(rotated_loadings)
-  primary_comp_idx    <- max.col(abs_loadings)
-  primary_assignments <- comp_names[primary_comp_idx]
-  primary_vals        <- rotated_loadings[cbind(seq_along(cols), primary_comp_idx)]
-  
-  assignments_df <- data.frame(
-    Item              = cols,
-    Primary_Component = primary_assignments,
-    Primary_Loading   = round(primary_vals, 3),
-    stringsAsFactors  = FALSE
+  # 3. PCA with Direct Oblimin rotation via psych::principal
+  # rotate = "oblimin" performs direct oblimin (GPArotation)
+  pca_fit <- psych::principal(
+    r      = x,
+    nfactors = n_factors,
+    rotate = "oblimin",
+    n.obs  = n_obs,
+    covar  = FALSE
   )
   
+  # Pattern matrix (P) and Component correlation matrix (Phi)
+  pattern_loadings <- unclass(pca_fit$loadings)
+  phi_matrix       <- pca_fit$Phi
+  
+  if (is.null(phi_matrix)) {
+    # If n_factors == 1 or orthogonal fallback occurs
+    phi_matrix <- diag(n_factors)
+    colnames(phi_matrix) <- rownames(phi_matrix) <- colnames(pattern_loadings)
+  }
+  
+  # 4. Optional anchor alignment (reflection of signs)
+  # Ensures the dominant variable on each component has a positive loading
+  if (align_anchors) {
+    for (j in seq_len(n_factors)) {
+      max_idx <- which.max(abs(pattern_loadings[, j]))
+      if (pattern_loadings[max_idx, j] < 0) {
+        pattern_loadings[, j] <- -pattern_loadings[, j]
+        phi_matrix[j, ]       <- -phi_matrix[j, ]
+        phi_matrix[, j]       <- -phi_matrix[, j]
+      }
+    }
+  }
+  
+  # 5. Structure Matrix (S = P %*% Phi)
+  # Relates variables to components accounting for factor correlations
+  structure_matrix <- pattern_loadings %*% phi_matrix
+  dimnames(structure_matrix) <- dimnames(pattern_loadings)
+  
+  # 6. Assignments table: Map each variable to its primary component
+  var_names <- rownames(pattern_loadings)
+  if (is.null(var_names)) {
+    var_names <- paste0("Var_", seq_len(nrow(pattern_loadings)))
+    rownames(pattern_loadings) <- var_names
+  }
+  
+  comp_names <- colnames(pattern_loadings)
+  max_comp_idx <- apply(abs(pattern_loadings), 1, which.max)
+  
+  assignments_df <- data.frame(
+    Variable         = var_names,
+    Assigned_Factor  = comp_names[max_comp_idx],
+    Max_Loading      = round(mapply(function(r, c) pattern_loadings[r, c], 
+                                    seq_along(max_comp_idx), 
+                                    max_comp_idx), 4),
+    stringsAsFactors = FALSE,
+    row.names        = NULL
+  )
+  
+  # 7. Return formatted output list
   list(
     eigenvalues         = sorted_evals,
     n_factors           = n_factors,
-    pattern_loadings    = round(as.data.frame(rotated_loadings), 4),
+    pattern_loadings    = round(as.data.frame(pattern_loadings), 4),
     structure_matrix    = round(as.data.frame(structure_matrix), 4),
     factor_correlations = round(as.data.frame(phi_matrix), 4),
     assignments_table   = assignments_df

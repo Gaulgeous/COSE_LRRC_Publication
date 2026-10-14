@@ -252,36 +252,34 @@ perform_horn_parallel_analysis_exact <- function(df = NULL,
 perform_abels_pca_oblimin_exact <- function(df = NULL, 
                                             corr_matrix = NULL, 
                                             df_or_corr = NULL,
-                                            n_factors = 3,
+                                            n_factors = 3, 
                                             n_observations = 26) {
-  # Resolve Correlation Matrix & Clean Labels
+  # 1. Resolve Correlation Matrix & Clean Labels
   parsed <- resolve_corr_matrix(df = df, corr_matrix = corr_matrix, df_or_corr = df_or_corr)
   r_mat  <- ensure_psd(parsed$cor_matrix)
   cols   <- parsed$labels
   n_obs  <- if (!is.na(parsed$n_obs)) parsed$n_obs else n_observations
   
-  # Dynamic Factor Retention (invokes Horn's Parallel Analysis if n_factors is NULL)
+  # 2. Dynamic Factor Retention (invokes Horn's Parallel Analysis if n_factors is NULL)
   if (is.null(n_factors)) {
-    pa_res    <- perform_horn_parallel_analysis_exact(r_mat, n_observations = n_obs, plot_comparison = FALSE, verbose = FALSE)
+    pa_res    <- perform_horn_parallel_analysis_exact(r_mat, n_observations = n_obs, 
+                                                      plot_comparison = FALSE, verbose = FALSE)
     n_factors <- max(1, pa_res$n_factors_parallel)
   }
   
-  # 3. Eigendecomposition
+  # 3. Eigendecomposition & Unrotated Loadings
   decomp       <- eigen(r_mat, symmetric = TRUE)
   sorted_evals <- decomp$values
   sorted_evecs <- decomp$vectors
   
-  # Unrotated Component Loadings: Lambda = V * sqrt(D)
   top_evals          <- sorted_evals[seq_len(n_factors)]
   top_evecs          <- sorted_evecs[, seq_len(n_factors), drop = FALSE]
   unrotated_loadings <- top_evecs %*% diag(sqrt(pmax(top_evals, 1e-12)), nrow = n_factors)
   
   comp_names <- paste0("Component ", seq_len(n_factors))
-  rownames(unrotated_loadings) <- cols
-  colnames(unrotated_loadings) <- comp_names
+  dimnames(unrotated_loadings) <- list(cols, comp_names)
   
-  # Direct Oblimin Multi-Start (Quartimin, normalize = FALSE)
-  # Generate exhaustive sign combinations for the retained components
+  # 4. Direct Oblimin Multi-Start (Quartimin, normalize = FALSE)
   sign_combinations <- as.matrix(expand.grid(rep(list(c(1, -1)), n_factors)))
   
   best_rot  <- NULL
@@ -312,11 +310,11 @@ perform_abels_pca_oblimin_exact <- function(df = NULL,
   }
   
   rotated_loadings <- unclass(best_rot$loadings)
-  rownames(rotated_loadings) <- cols
-  colnames(rotated_loadings) <- comp_names
-  phi_matrix <- best_rot$Phi
+  phi_matrix       <- best_rot$Phi
+  dimnames(rotated_loadings) <- list(cols, comp_names)
+  dimnames(phi_matrix)       <- list(comp_names, comp_names)
   
-  # Anchor Matching & Alignment (Applied if 3 components are extracted)
+  # 5. Anchor Matching & Alignment (Applied if 3 components are extracted)
   find_idx <- function(pattern, target_names) {
     m <- grep(pattern, target_names, ignore.case = TRUE)
     if (length(m) > 0) m[1] else NA_integer_
@@ -327,22 +325,39 @@ perform_abels_pca_oblimin_exact <- function(df = NULL,
   law_row  <- find_idx("Lawful", cols)
   
   if (n_factors == 3 && !is.na(auth_row) && !is.na(rel_row)) {
-    c1_idx <- which.max(abs(rotated_loadings[auth_row, ]))
-    c2_idx <- which.max(abs(rotated_loadings[rel_row, ]))
-    c3_idx <- setdiff(seq_len(3), c(c1_idx, c2_idx))
+    # Evaluate all 6 permutations to guarantee a valid 1-to-1 column mapping
+    all_perms <- list(
+      c(1, 2, 3), c(1, 3, 2),
+      c(2, 1, 3), c(2, 3, 1),
+      c(3, 1, 2), c(3, 2, 1)
+    )
     
-    col_order        <- c(c1_idx, c2_idx, c3_idx)
-    rotated_loadings <- rotated_loadings[, col_order]
-    phi_matrix       <- phi_matrix[col_order, col_order]
+    # Select the permutation maximizing total absolute loading across anchors
+    perm_scores <- sapply(all_perms, function(p) {
+      abs(rotated_loadings[auth_row, p[1]]) + 
+        abs(rotated_loadings[rel_row,  p[2]]) + 
+        (if (!is.na(law_row)) abs(rotated_loadings[law_row, p[3]]) else 0)
+    })
     
+    col_order <- all_perms[[which.max(perm_scores)]]
+    
+    # Permute columns and phi matrix (guaranteed 3x3)
+    rotated_loadings <- rotated_loadings[, col_order, drop = FALSE]
+    phi_matrix       <- phi_matrix[col_order, col_order, drop = FALSE]
+    
+    # Orient signs so anchor variables point in the positive direction
     target_signs <- c(
-      if (rotated_loadings[auth_row, 1] > 0) -1 else 1,
-      if (rotated_loadings[rel_row, 2] < 0)  -1 else 1,
+      if (rotated_loadings[auth_row, 1] < 0) -1 else 1,
+      if (rotated_loadings[rel_row,  2] < 0) -1 else 1,
       if (!is.na(law_row) && rotated_loadings[law_row, 3] < 0) -1 else 1
     )
     
-    rotated_loadings <- rotated_loadings %*% diag(target_signs)
-    phi_matrix       <- diag(target_signs) %*% phi_matrix %*% diag(target_signs)
+    sign_diag        <- diag(target_signs, nrow = 3, ncol = 3)
+    rotated_loadings <- rotated_loadings %*% sign_diag
+    phi_matrix       <- sign_diag %*% phi_matrix %*% sign_diag
+    
+    dimnames(rotated_loadings) <- list(cols, comp_names)
+    dimnames(phi_matrix)       <- list(comp_names, comp_names)
   }
   
   # 6. Final Matrices & Assignment Table

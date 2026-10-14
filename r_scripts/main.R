@@ -23,14 +23,15 @@ source("statistical_means.R")
 
 set.seed(42)
 
-excel_file <- here("..", "Data", "consolidated_results.xlsx")
-sheets     <- c("CoC", "Au", "In", "Re", "La", "Fi", "Cq", "Rr", "Pc")
 n_boot     <- 1000
 percentile  <- 95.0
 seed       <- 42
-manual_n_components <- 3   # Controls PCA dimensions (NULL = Horn's Parallel Analysis)
+manual_n_components <- 2   # Controls PCA dimensions (NULL = Horn's Parallel Analysis)
 manual_n_clusters   <- 3   # Controls K-Means groups   (NULL = NbClust consensus)
-comp_names <- c("Data Provenance", "Process Replication", "Authority & Expertise")
+
+excel_file <- here("..", "Data", "consolidated_results.xlsx")
+sheets     <- c("CoC", "Au", "In", "Re", "La", "Fi", "Cq", "Rr", "Pc")
+comp_names <- c("Data Provenance", "Process Replication")
 cluster_names <- c("Mechanism-Driven", "Admissibility-Driven", "Provenance-Driven")
 palette <- c(
 
@@ -38,6 +39,9 @@ palette <- c(
   "Admissibility-Driven" = "#0066FF",  # Blue
   "Provenance-Driven"    = "#9B59B6"   # Purple
 )
+
+# excel_file <- here("..", "Data", "am_consolidated_results.xlsx")
+# sheets     <- c("DP", "PR", "AE", "DV", "AF", "CL", "DA")
 
 # =========================================================================
 # Statistical Means
@@ -106,45 +110,66 @@ print(final_results)
 # Ingest for PCA and Clustering
 # =========================================================================
 
-# Read starting from Row 2 so sub-headers ("Category", "Author", and the 9 items)
-# become clean column names. This ensures numeric columns are parsed as numeric
-# rather than being coerced to character by a text header row.
+# Skipping row 1 makes Row 2 ("Category", "Author", and the 9 items) the column names
 df_raw <- as.data.frame(readxl::read_excel(file_path, sheet = "Whole", skip = 1))
 
-# Standardize column names (strip whitespace)
+# Clean column headers (trim leading/trailing whitespace)
 colnames(df_raw) <- trimws(colnames(df_raw))
 
-# Identify which column holds the publication citation / key ("Author" or "Publication")
-pub_col <- if ("Author" %in% colnames(df_raw)) {
-  "Author"
-} else if ("Publication" %in% colnames(df_raw)) {
-  "Publication"
-} else {
-  colnames(df_raw)[1]
+# Identify metadata columns
+cat_col <- grep("^category$", colnames(df_raw), ignore.case = TRUE, value = TRUE)[1]
+pub_col <- grep("^(author|publication)$", colnames(df_raw), ignore.case = TRUE, value = TRUE)[1]
+
+if (is.na(pub_col)) pub_col <- colnames(df_raw)[2]
+if (is.na(cat_col)) cat_col <- colnames(df_raw)[1]
+
+# Forward-fill merged Category cells so every publication has its category label
+raw_cat_vec <- trimws(as.character(df_raw[[cat_col]]))
+filled_cat  <- character(length(raw_cat_vec))
+curr_cat    <- NA_character_
+
+for (i in seq_along(raw_cat_vec)) {
+  val <- raw_cat_vec[i]
+  if (!is.na(val) && val != "" && val != "NA") {
+    curr_cat <- val
+  }
+  filled_cat[i] <- curr_cat
 }
+df_raw[[cat_col]] <- filled_cat
 
-# Exclude Frowis_2020 outlier
-cleaned_raw <- df_raw[!grepl("Frowis_2020", df_raw[[pub_col]], ignore.case = TRUE), ]
+# Filter out empty/trailing rows (must have a valid Author/Publication entry)
+valid_rows <- !is.na(df_raw[[pub_col]]) & 
+  trimws(df_raw[[pub_col]]) != "" & 
+  trimws(df_raw[[pub_col]]) != "NA"
 
-# Preserve publication keys as rownames (using standard data.frame)
-rownames(cleaned_raw) <- make.unique(as.character(cleaned_raw[[pub_col]]))
+cleaned_raw <- df_raw[valid_rows, , drop = FALSE]
 
-# Exclude metadata columns ("Category", "Author", "Publication", etc.)
-metadata_cols <- grep("^(category|author|publication)$", colnames(cleaned_raw), 
-                      ignore.case = TRUE, value = TRUE)
+# Assign unique publication names as row identifiers
+rownames(cleaned_raw) <- make.unique(trimws(as.character(cleaned_raw[[pub_col]])))
 
-feature_cols <- setdiff(colnames(cleaned_raw), metadata_cols)
+# Exclude metadata columns
+metadata_cols <- c(cat_col, pub_col)
+feature_cols  <- setdiff(colnames(cleaned_raw), metadata_cols)
 
-# Extract and convert items to a numeric data frame, omitting incomplete cases
-items_clean <- stats::na.omit(as.data.frame(lapply(cleaned_raw[, feature_cols, drop = FALSE], as.numeric)))
-rownames(items_clean) <- rownames(cleaned_raw)[as.numeric(rownames(items_clean))]
+# Coerce scorecard items to numeric matrix and wrap into data.frame
+# Row names (author labels) are preserved automatically
+feature_mat <- apply(cleaned_raw[, feature_cols, drop = FALSE], 2, function(x) {
+  as.numeric(trimws(as.character(x)))
+})
+rownames(feature_mat) <- rownames(cleaned_raw)
 
-# Calculate sample size after outlier removal (N = 89)
+# Keep complete cases
+items_clean <- stats::na.omit(as.data.frame(feature_mat))
+
+# Retain matched category vector for downstream category analyses
+categories_clean <- cleaned_raw[rownames(items_clean), cat_col]
+
+# Sample size verification (N = 89)
 n_obs <- nrow(items_clean)
 
-# =========================================================================
-# 4. Verify Dimensions
-# =========================================================================
+cat(sprintf("Successfully imported %d publications across %d scorecard items.\n", 
+            n_obs, ncol(items_clean)))
+print(dim(items_clean))
 
 # Expected: 89 rows (90 minus Frowis_2020) by 9 columns
 cat(sprintf("Cleaned items dimensions: %d observations by %d scorecard items.\n", 
@@ -247,6 +272,11 @@ compute_internal_reliabilty(df = items_clean, corr_matrix = cor_polychoric)
 # 1. Polychoric Correlation Matrix (Exact 2-Step MLE)
 # =========================================================================
 
+kendall_matrix <- compute_psd_kendall_simple(items_clean)
+
+cat("--- Positive Semi-Definite Kendall Tau-b Correlation Matrix ---\n")
+print(round(kendall_matrix, 3))
+
 # Compute exact pairwise MLE without Taylor approximations
 poly_res       <- psych::polychoric(items_clean, global = FALSE, correct = 0, smooth = FALSE)
 cor_polychoric <- poly_res$rho
@@ -339,7 +369,7 @@ rel_res <- compute_internal_reliability_simple(
 # =========================================================================
 
 # Project observations (polarity is already inverted; semantic names assigned)
-scores_r3 <- project_pca_scores(items_clean, pca_exact)
+scores_r3 <- project_pca_scores(items_clean, pca_res)
 
 # Verify structure and dimensions
 print(head(scores_r3, 3))
@@ -380,30 +410,30 @@ cluster_results$item_profiles
 # Publication Visualization
 # =========================================================================
 
-s3d_plot <- plot_pca_clusters_3d(
-  scores        = scores_r3,
-  clusters      = cluster_results$assignments$Cluster,
-  comp_names    = comp_names,
-  cluster_names = cluster_names,
-  palette       = palette,
-  title         = "Projecting Publications onto Principal Components",
-  angle         = 130 # Optimal cluster separation azimuth
-)
+# s3d_plot <- plot_pca_clusters_3d(
+#   scores        = scores_r3,
+#   clusters      = cluster_results$assignments$Cluster,
+#   comp_names    = comp_names,
+#   cluster_names = cluster_names,
+#   palette       = palette,
+#   title         = "Projecting Publications onto Principal Components",
+#   angle         = 130 # Optimal cluster separation azimuth
+# )
 
 # For finding the perfect angle for publication
 # for (theta in seq(0, 360, by = 10)) {
 #   s3d_plot <- plot_pca_clusters_3d(
-#     scores        = scores_r3,
-#     clusters      = cluster_results$assignments$Cluster,
-#     comp_names    = comp_names,
-#     cluster_names = cluster_names,
-#     palette       = palette,
-#     title         = sprintf("Projecting Publications onto Principal Components (Angle: %d°)", theta),
-#     angle         = theta
-#   )
-  
+#    scores        = scores_r3,
+#    clusters      = cluster_results$assignments$Cluster,
+#    comp_names    = comp_names,
+#    cluster_names = cluster_names,
+#    palette       = palette,
+#    title         = sprintf("Projecting Publications onto Principal Components (Angle: %d°)", theta),
+#    angle         = theta
+# )
+#   
 #   # Pause briefly so frames render visually if viewing in an interactive plot window
-#   Sys.sleep(0.1)
+#  Sys.sleep(0.1)
 # }
 
 # Optional: Add publication row labels directly to the points
@@ -414,6 +444,26 @@ s3d_plot <- plot_pca_clusters_3d(
 #   cex    = 0.65
 # )
 
+s2d_plot <- plot_pca_clusters_2d(
+  scores        = scores_r3,
+  clusters      = cluster_results$assignments$Cluster,
+  title         = "Projecting Publications onto Principal Components"
+)
+
+# Step 1: Append categories and extract labels
+prepared_data <- prepare_cluster_category_data(
+  assignments_df = cluster_results$assignments,
+  categories     = categories_clean
+)
+
+# Step 2: Update your working assignments dataframe
+cluster_results$assignments <- prepared_data$augmented_assignments
+
+# Step 3: Plot the 3 donut charts
+plot_cluster_category_donuts(
+  assignments_df = cluster_results$assignments,
+  cluster_col    = "Cluster_Name"
+)
 # -------------------------------------------------------------------------
 # Tally Cluster Counts and Compute Donut Chart Geometry
 # -------------------------------------------------------------------------
@@ -444,3 +494,4 @@ plot_eigenvalue_retention(
   ),
   title      = "Horn's Parallel Analysis: Eigenvalue Retention"
 )
+

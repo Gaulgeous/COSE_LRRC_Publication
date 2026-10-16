@@ -751,7 +751,6 @@ plot_cluster_category_donuts <- function(assignments_df,
     ggplot2::scale_fill_manual(values = category_palette, drop = FALSE) +
     ggplot2::labs(
       title    = title,
-      subtitle = "Inner numbers denote absolute count and percentage share per cluster",
       fill     = "Publication Category"
     ) +
     ggplot2::theme_void(base_size = 12) +
@@ -859,7 +858,6 @@ plot_accompanying_evidence <- function(cluster_results,
     eigenvalues = pa_res,  
     comp_names  = comp_names,
     top_n       = manual_n_components,
-    palette     = palette,
     title      = "Horn's Parallel Analysis: Eigenvalue Retention"
   )
 }

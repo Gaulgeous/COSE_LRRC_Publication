@@ -118,8 +118,16 @@ compute_category_euclidean_distance_simple <- function(category_means,
   old_par <- par(no.readonly = TRUE)
   on.exit(par(old_par))
   
-  # Expand bottom and left margins to accommodate category labels
-  par(mar = c(6, 6, 4, 3))
+  # Calculate max string width in margin lines
+  # strwidth(..., units = "inches") / par("cin")[2] converts inches to margin line units
+  max_label_len <- max(graphics::strwidth(cats, units = "inches", cex = 0.85))
+  margin_needed <- (max_label_len / par("cin")[2]) + 1.5  # +1.5 line buffer for tick spacing
+  
+  # Ensure margins don't shrink below standard minimums
+  bottom_mar <- max(5, margin_needed)
+  left_mar   <- max(5, margin_needed)
+  
+  par(mar = c(bottom_mar, left_mar, 4, 3))
   
   # Color palette: low distance (similar) to high distance (dissimilar)
   color_func <- grDevices::colorRampPalette(palette)

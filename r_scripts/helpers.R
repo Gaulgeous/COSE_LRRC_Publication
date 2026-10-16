@@ -192,7 +192,7 @@ run_preliminary_stats <- function(excel_file,
   # and renders the publication-ready heatmap
   category_distances <- compute_category_euclidean_distance_simple(
     category_means = category_means,
-    title          = "Euclidean Distance Between Publication Categories",
+    title          = "Euclidean Distance Between Publication Category Centroids",
     show_values    = TRUE
   )
   

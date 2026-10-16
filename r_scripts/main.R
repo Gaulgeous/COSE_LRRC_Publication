@@ -167,12 +167,32 @@ cluster_results$item_profiles
 #     palette       = palette
 # )
 
+# Calculate theoretical bounds for pca
+# Compute correlation matrix of the raw items
+R <- stats::cor(items_clean, use = "pairwise.complete.obs")
+
+# Structure matrix from pca_res (9x2)
+S <- as.matrix(pca_res$structure_matrix)
+
+# Scoring weights (9 x 2)
+B <- solve(R) %*% S
+
+# 1. Calculate limits (using your scoring weights B)
+axis_limits <- get_factor_plot_limits(B, items_clean, min_val = 0, max_val = 2)
+print(axis_limits)
+
+# 2. Extract x and y bounds with 5% padding
+x_bounds <- c(axis_limits$Min[1], axis_limits$Max[1]) * 1.05
+y_bounds <- c(axis_limits$Min[2], axis_limits$Max[2]) * 1.05
+
 
 # For 3d plotting of two principal components
 s2d_plot <- plot_pca_clusters_2d(
   scores        = scores_r3,
   clusters      = cluster_results$assignments$Cluster,
-  title         = "Projecting Publications onto Principal Components"
+  title         = "Projecting Publications onto Principal Components",
+  xlim          = x_bounds,
+  ylim          = y_bounds
 )
 
 # Plot graphs which perform additional statistical verifications
@@ -184,6 +204,3 @@ plot_accompanying_evidence(cluster_results = cluster_results,
   comp_names = comp_names,
   manual_n_components = manual_n_components,
 )
-
-
-

@@ -176,7 +176,7 @@ perform_horn_parallel_analysis_simple <- function(x,
     
     plot(comp_idx, emp_ev, type = "b", pch = 19, col = "#1f77b4", lwd = 2,
          ylim = y_limits, xlab = "Component Number", ylab = "Eigenvalue",
-         main = "Parallel Analysis vs. Empirical Scree Plot", xaxt = "n")
+         main = "Comparison of Horn's Parallel Analysis & Scree Plot", xaxt = "n")
     axis(1, at = comp_idx)
     lines(comp_idx, sim_q, type = "b", pch = 15, col = "#d62728", lty = 2, lwd = 1.75)
     lines(comp_idx, sim_mu, type = "b", pch = 17, col = "#7f7f7f", lty = 3, lwd = 1.25)
@@ -185,9 +185,9 @@ perform_horn_parallel_analysis_simple <- function(x,
     
     legend("topright",
            legend = c("Empirical Eigenvalues",
-                      sprintf("Simulated %dth %%ile", as.integer(percentile)),
+                      sprintf("Simulated %dth Percentile", as.integer(percentile)),
                       "Simulated Mean",
-                      sprintf("Kaiser Rule (lambda = %.1f)", kaiser_cutoff)),
+                      sprintf("Kaiser-Gutmann Cut-Off", kaiser_cutoff)),
            col = c("#1f77b4", "#d62728", "#7f7f7f", "black"),
            pch = c(19, 15, 17, NA),
            lty = c(1, 2, 3, 3),
@@ -366,6 +366,40 @@ compute_internal_reliability_simple <- function(df, verbose = TRUE) {
     poly_alpha_obj    = ord_alpha,
     omega_obj         = om_fit
   ))
+}
+
+get_factor_plot_limits <- function(B, items_data, min_val = 0, max_val = 2) {
+  # Column means and sds used for standardization (Z-scores)
+  means <- colMeans(items_data, na.rm = TRUE)
+  sds   <- apply(items_data, 2, stats::sd, na.rm = TRUE)
+  
+  # Standardized item boundaries
+  z_min <- (min_val - means) / sds
+  z_max <- (max_val - means) / sds
+  
+  n_factors <- ncol(B)
+  factor_names <- colnames(B)
+  if (is.null(factor_names)) factor_names <- paste0("Factor_", seq_len(n_factors))
+  
+  limits <- data.frame(
+    Factor = factor_names,
+    Min    = numeric(n_factors),
+    Max    = numeric(n_factors)
+  )
+  
+  for (k in seq_len(n_factors)) {
+    w <- B[, k]
+    
+    # Positive weights take z_max to maximize, z_min to minimize
+    # Negative weights take z_min to maximize, z_max to minimize
+    x_max <- ifelse(w >= 0, z_max, z_min)
+    x_min <- ifelse(w >= 0, z_min, z_max)
+    
+    limits$Max[k] <- sum(w * x_max)
+    limits$Min[k] <- sum(w * x_min)
+  }
+  
+  return(limits)
 }
 
 run_simple_pca <- function(items,

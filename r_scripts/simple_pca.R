@@ -367,3 +367,111 @@ compute_internal_reliability_simple <- function(df, verbose = TRUE) {
     omega_obj         = om_fit
   ))
 }
+
+run_simple_pca <- function(items,
+                           n_obs,
+                           n_boot = 1000,
+                           percentile = 95.0,
+                           manual_n_components = 2,
+                           ...) {
+  # =========================================================================
+  # 1. Polychoric Correlation Matrix (Exact 2-Step MLE)
+  # =========================================================================
+  
+  kendall_matrix <- compute_psd_kendall_simple(items_clean)
+  
+  cat("--- Positive Semi-Definite Kendall Tau-b Correlation Matrix ---\n")
+  print(round(kendall_matrix, 3))
+  
+  # Compute exact pairwise MLE without Taylor approximations
+  poly_res       <- psych::polychoric(items_clean, global = FALSE, correct = 0, smooth = FALSE)
+  cor_polychoric <- poly_res$rho
+  
+  # Conditional PSD check: project only if pairwise MLE yields a negative eigenvalue
+  if (min(eigen(cor_polychoric, symmetric = TRUE, only.values = TRUE)$values) < 0) {
+    pd_obj         <- Matrix::nearPD(cor_polychoric, corr = TRUE, keepDiag = TRUE)
+    cor_polychoric <- as.matrix(pd_obj$mat)
+    dimnames(cor_polychoric) <- dimnames(poly_res$rho)
+  }
+  
+  cat("--- Polychoric Correlation Matrix ---\n")
+  print(round(cor_polychoric, 3))
+  
+  # Full matrix correlation heatmap
+  plot_correlation_heatmap(
+    cor_mat = cor_polychoric,
+    type    = "full",
+    title   = "Polychoric Correlation of Publication's Coverage of Scorecard Components"
+  )
+  
+  # =========================================================================
+  # 2. Factorability Diagnostics (Bartlett's Test & KMO)
+  # =========================================================================
+  
+  factorability_res <- assess_factorability_simple(
+    cor_mat = cor_polychoric, 
+    n_obs   = n_obs, 
+    verbose = TRUE
+  )
+  
+  # =========================================================================
+  # 3. Dimension Retention (Scree & Horn's Parallel Analysis)
+  # =========================================================================
+  
+  # Horn's Parallel Analysis (1,000 Monte Carlo runs with N = 90 noise)
+  pa_res <- perform_horn_parallel_analysis_simple(
+    x               = cor_polychoric,
+    n_obs           = n_obs,
+    n_simulations   = n_boot,
+    percentile      = percentile,
+    plot_comparison = TRUE,
+    verbose         = TRUE
+  )
+  
+  # =========================================================================
+  # 4. PCA with Direct Oblimin Rotation & Anchor Alignment
+  # =========================================================================
+  
+  # If manual_n_components is NULL, it will automatically fall back to pa_res$n_factors_parallel
+  n_comp_to_extract <- if (exists("manual_n_components") && !is.null(manual_n_components)) {
+    manual_n_components
+  } else {
+    pa_res$n_factors_parallel
+  }
+  
+  pca_res <- perform_abels_pca_oblimin_simple(
+    x             = cor_polychoric,
+    n_factors     = n_comp_to_extract,
+    n_obs         = n_obs,
+    align_anchors = TRUE
+  )
+  
+  cat("--- Rotated Pattern Matrix (Table 3 Style) ---\n")
+  print(pca_res$pattern_loadings)
+  
+  cat("\n--- Structure Matrix (Table 4 Style) ---\n")
+  print(pca_res$structure_matrix)
+  
+  cat("\n--- Component Inter-Correlation Matrix (Phi) ---\n")
+  print(pca_res$factor_correlations)
+  
+  cat("\n--- Item-to-Component Primary Assignments ---\n")
+  print(pca_res$assignments_table, row.names = FALSE)
+  
+  # =========================================================================
+  # 5. Internal Reliability (Raw Alpha, Ordinal Alpha, & McDonald's Omega)
+  # =========================================================================
+  
+  # Self-contained: computes alpha, ordinal alpha, omega, and dropped diagnostics directly
+  rel_res <- compute_internal_reliability_simple(
+    df      = items_clean, 
+    verbose = TRUE
+  )
+  
+  info <- list(
+    pca_res = pca_res,
+    pa_res = pa_res
+  )
+  
+  invisible(info)
+}

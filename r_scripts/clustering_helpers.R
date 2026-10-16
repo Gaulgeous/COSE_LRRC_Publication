@@ -1,6 +1,6 @@
 source("helpers.R")
 
-project_pca_scores <- function(df, pca_res) {
+project_pca_scores <- function(df, pca_res, comp_names) {
 
   # Clean labels and numeric coercion using clean_labels()
   clean_df <- clean_labels(df)
@@ -24,8 +24,10 @@ project_pca_scores <- function(df, pca_res) {
   rownames(scores_r3) <- rownames(clean_df)
   
   # Component naming and polarity alignment
-  colnames(scores_r3) <- c("Data Provenance", "Process Replication")
-  scores_r3[, "Data Provenance"] <- -1 * scores_r3[, "Data Provenance"]
+  colnames(scores_r3) <- comp_names
+  
+  # Double check that this column shouldn't be inverted
+  # scores_r3[, "Data Provenance"] <- -1 * scores_r3[, "Data Provenance"]
   
   scores_r3
 }

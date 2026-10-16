@@ -437,3 +437,97 @@ compute_internal_reliabilty <- function(df = NULL, corr_matrix = NULL) {
   print(diagnostics_table, row.names = FALSE)
   cat("\n")
 }
+
+
+run_complex_pca <-function(items,
+                           n_boot = 1000,
+                           percentile = 95.0,
+                           manual_n_components = 2,
+                           seed = 42,
+                           ...) {
+  
+  # =========================================================================
+  # Polychoric and Kendall Correlation Matrix (2S-MLE, Continuity Correction, Smoothing)
+  # =========================================================================
+  
+  kendall_matrix <- compute_psd_kendall(items_clean)
+  
+  cat("--- Positive Semi-Definite Kendall Tau-b Correlation Matrix ---\n")
+  print(round(kendall_matrix, 3))
+  
+  # Compute exact 2-step MLE without Taylor approximations or continuity distortion
+  #    global = FALSE -> Evaluates thresholds per pair
+  #    correct = 0    -> Prevents artificial off-diagonal probability inflation
+  #    smooth = FALSE -> Prevents cor.smooth from flattening strong signals
+  poly_mle <- polychoric(
+    items_clean,
+    global  = FALSE,
+    correct = 0,
+    smooth  = FALSE
+  )$rho
+  
+  # Apply Higham nearest correlation projection
+  cor_polychoric <- project_near_psd(poly_mle)
+  dimnames(cor_polychoric) <- dimnames(poly_mle)
+  
+  cat("--- Polychoric Matrix (Matching Python Implementation) ---\n")
+  print(round(cor_polychoric, 3))
+  
+  # Lower triangle heatmap (standard publication format)
+  # plot_correlation_heatmap(
+  #   cor_mat = cor_polychoric,
+  #   type    = "lower",
+  #   title   = "Polychoric Correlation of Publication's Coverage of Scorecard Components"
+  # )
+  
+  # Full matrix heatmap without text values
+  plot_correlation_heatmap(
+    cor_mat     = cor_polychoric,
+    type        = "full",
+    title = "Polychoric Correlation of Publication's Coverage of Scorecard Components"
+  )
+  
+  # =========================================================================
+  # Factorability Diagnostics (Bartlett's Test & Bootstrapped KMO)
+  # =========================================================================
+  
+  assess_factorability(cor_polychoric, n_obs)
+  
+  # =========================================================================
+  # Dimension Retention (Kaiser-Guttman & Horn's Parallel Analysis)
+  # =========================================================================
+  
+  # Exact Parallel Analysis
+  pa_res <- perform_horn_parallel_analysis_exact(
+    df             = items_clean,
+    n_observations = nrow(items_clean), # 26
+    n_simulations  = n_boot,
+    percentile     = percentile
+  )
+  
+  # =========================================================================
+  # Principal Component Analysis with Direct Oblimin Rotation
+  # =========================================================================
+  
+  pca_exact <- perform_abels_pca_oblimin_exact(df = items_clean, n_factors = manual_n_components)
+  
+  cat("--- Rotated Pattern Matrix (Table 3 Style) ---\n")
+  print(round(pca_exact$pattern_loadings, 3))
+  
+  cat("\n--- Structure Matrix (Table 4 Style) ---\n")
+  print(round(pca_exact$structure_matrix, 3))
+  
+  cat("\n--- Component Inter-Correlation Matrix (Phi) ---\n")
+  print(round(pca_exact$factor_correlations, 3))
+  
+  cat("\n--- Item-to-Component Primary Assignments ---\n")
+  print(pca_exact$assignments_table, row.names = FALSE)
+  
+  # =========================================================================
+  # Internal Reliability Diagnostics (Cronbach's Alpha & McDonald's Omega)
+  # =========================================================================
+  
+  compute_internal_reliabilty(df = items_clean, corr_matrix = cor_polychoric)
+  
+  invisible(pca_exact)
+}

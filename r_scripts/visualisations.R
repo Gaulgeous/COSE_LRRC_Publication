@@ -769,3 +769,98 @@ plot_cluster_category_donuts <- function(assignments_df,
   return(p)
 }
 
+plot_3d_images <- function(scores,
+                           clusters,
+                           comp_names,
+                           cluster_names,
+                           palette,
+                           ...) {
+  
+  s3d_plot <- plot_pca_clusters_3d(
+    scores        = scores_r3,
+    clusters      = cluster_results$assignments$Cluster,
+    comp_names    = comp_names,
+    cluster_names = cluster_names,
+    palette       = palette,
+    title         = "Projecting Publications onto Principal Components",
+    angle         = 130 # Optimal cluster separation azimuth
+  )
+
+  # For finding the perfect angle for publication
+  for (theta in seq(0, 360, by = 10)) {
+    s3d_plot <- plot_pca_clusters_3d(
+     scores        = scores_r3,
+     clusters      = cluster_results$assignments$Cluster,
+     comp_names    = comp_names,
+     cluster_names = cluster_names,
+     palette       = palette,
+     title         = sprintf("Projecting Publications onto Principal Components (Angle: %d°)", theta),
+     angle         = theta
+  )
+
+    # Pause briefly so frames render visually if viewing in an interactive plot window
+   Sys.sleep(0.1)
+  }
+
+  # Optional: Add publication row labels directly to the points
+  text(
+    s3d_plot$xyz.convert(scores_r3[, 1], scores_r3[, 2], scores_r3[, 3]),
+    labels = rownames(scores_r3),
+    pos    = 3,
+    cex    = 0.65
+  )
+  
+  
+  invisible(s3d_plot)
+}
+
+plot_accompanying_evidence <- function(cluster_results,
+                                       categories_clean,
+                                       cluster_names,
+                                       palette,
+                                       pa_res,
+                                       comp_names,
+                                       manual_n_components,
+                                       ...) {
+  # Step 1: Append categories and extract labels
+  prepared_data <- prepare_cluster_category_data(
+    assignments_df = cluster_results$assignments,
+    categories     = categories_clean
+  )
+  
+  # Step 2: Update your working assignments dataframe
+  cluster_results$assignments <- prepared_data$augmented_assignments
+  
+  # Step 3: Plot the 3 donut charts
+  plot_cluster_category_donuts(
+    assignments_df = cluster_results$assignments,
+    cluster_col    = "Cluster_Name"
+  )
+  # -------------------------------------------------------------------------
+  # Tally Cluster Counts and Compute Donut Chart Geometry
+  # -------------------------------------------------------------------------
+  
+  # Seamless integration with previously computed clusters
+  donut_res <- plot_cluster_donut(
+    clusters = cluster_results, 
+    cluster_order = cluster_names, 
+    palette  = palette,
+    title    = "Publication Cluster Distribution"
+  )
+  
+  # Access count summary table
+  print(donut_res$cluster_counts)
+  
+  # -------------------------------------------------------------------------
+  # Prepare Eigenvalue Data (From Horn's Analysis)
+  # -------------------------------------------------------------------------
+  
+  plot_eigenvalue_retention(
+    eigenvalues = pa_res,  
+    comp_names  = comp_names,
+    top_n       = manual_n_components,
+    palette     = palette,
+    title      = "Horn's Parallel Analysis: Eigenvalue Retention"
+  )
+}
+

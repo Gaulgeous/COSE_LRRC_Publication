@@ -33,12 +33,12 @@ manual_n_clusters   <- 3   # Controls K-Means groups   (NULL = NbClust consensus
 excel_file <- here("..", "Data", "consolidated_results.xlsx")
 sheet_name = "Whole"
 sheets     <- c("CoC", "Au", "In", "Re", "La", "Fi", "Cq", "Rr", "Pc")
-comp_names <- c("Data Provenance", "Process Replication")
-cluster_names <- c("Mechanism-Driven", "Admissibility-Driven", "Provenance-Driven")
+comp_names <- c("Evidentiary Provenance", "Methodological Validity")
+cluster_names <- c("Mechanism-Driven", "Provenance-Driven", "Admissibility-Driven")
 palette <- c(
-  "Mechanism-Driven"     = "#FF2A54",  # Red
-  "Admissibility-Driven" = "#0066FF",  # Blue
-  "Provenance-Driven"    = "#9B59B6"   # Purple
+  "Admissibility-Driven"     = "#FF2A54",  # Red
+  "Provenance-Driven" = "#0066FF",  # Blue
+  "Mechanism-Driven"    = "#9B59B6"   # Purple
 )
 
 # Define column positions for Krippendorff's alpha (assuming Col 1 is Publication)
@@ -191,6 +191,9 @@ s2d_plot <- plot_pca_clusters_2d(
   scores        = scores_r3,
   clusters      = cluster_results$assignments$Cluster,
   title         = "Projecting Publications onto Principal Components",
+  comp_names    = comp_names,
+  cluster_names = cluster_names,
+  palette       = palette,
   xlim          = x_bounds,
   ylim          = y_bounds
 )
@@ -204,3 +207,4 @@ plot_accompanying_evidence(cluster_results = cluster_results,
   comp_names = comp_names,
   manual_n_components = manual_n_components,
 )
+
